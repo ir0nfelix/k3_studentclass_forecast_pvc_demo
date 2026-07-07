@@ -69,7 +69,6 @@ jobs:
         run: |
           helm upgrade --install weather-app ./charts/weather-app \
             --namespace student812 \
-            --create-namespace \
             --set image.repository=${{ env.IMAGE_REPO }} \
             --set image.tag=${{ github.sha }} \
             --wait \
