@@ -68,7 +68,7 @@ jobs:
       - name: Deploy to Kubernetes using Helm
         run: |
           helm upgrade --install weather-app ./charts/weather-app \
-            --namespace student812 \
+            --namespace ${{ secrets.K8S_NAMESPACE }} \
             --set image.repository=${{ env.IMAGE_REPO }} \
             --set image.tag=${{ github.sha }} \
             --wait \
