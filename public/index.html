@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEST CI/CD - Target Service</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Прогноз погоды</h1>
+        </header>
+
+        <main>
+            <div class="control-group">
+                <label for="citySelect">Выберите филиал Хекслет:</label>
+                <select id="citySelect">
+                    <option value="" disabled selected>-- Выберите город --</option>
+                    <option value="moscow">Москва</option>
+                    <option value="spb">Санкт-Петербург</option>
+                    <option value="novosibirsk">Новосибирск</option>
+                    <option value="rostov">Ростов-на-Дону</option>
+                </select>
+                <button id="fetchBtn" class="primary-btn" disabled>Запросить данные</button>
+            </div>
+
+            <div class="weather-card" id="weatherDisplay" style="display: none;">
+                <div class="loader" id="loader" style="display: none;"></div>
+                <div id="weatherContent">
+                    <div class="data-row">
+                        <span class="label">Температура:</span>
+                        <span class="value" id="tempValue">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Ощущается как:</span>
+                        <span class="value" id="feelsLikeValue">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Состояние:</span>
+                        <span class="value" id="conditionValue">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Влажность:</span>
+                        <span class="value" id="humidityValue">--</span>
+                    </div>
+                    <div class="data-row">
+                        <span class="label">Ветер:</span>
+                        <span class="value" id="windSpeedValue">--</span>
+                    </div>
+                </div>
+                <div id="errorDisplay" class="error-msg" style="display: none;"></div>
+            </div>
+
+            <div class="history-card" id="historyDisplay" style="display: none; margin-top: 20px;">
+                <h3 class="history-title">История запросов (последние 10)</h3>
+                <table id="historyTable" class="styled-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Город</th>
+                            <th>Температура</th>
+                            <th>Дата/Время</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyContent">
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>

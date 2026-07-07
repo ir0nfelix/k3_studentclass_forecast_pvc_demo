@@ -1,0 +1,124 @@
+# 1. Запрашиваем 256Мб диска для базы
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-stateful-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 256Mi 
+---
+# 2. Внутренний сервис для СУБД
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-db-stateful-service
+spec:
+  selector:
+    app: weather-db-stateful
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+---
+# 3. StatefulSet для базы данных
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: weather-db-stateful
+spec:
+  serviceName: "weather-db-stateful-service"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weather-db-stateful
+  template:
+    metadata:
+      labels:
+        app: weather-db-stateful
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        env:
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: weather-secrets
+              key: db-user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: weather-secrets
+              key: db-password
+        - name: POSTGRES_DB
+          value: "weather_db"
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: db-data
+        persistentVolumeClaim:
+          claimName: postgres-stateful-pvc
+---
+# 4. Наш бэкенд (Node.js)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-app-stateful
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weather-app-stateful
+  template:
+    metadata:
+      labels:
+        app: weather-app-stateful
+    spec:
+      containers:
+      - name: weather-app-stateful
+        image: ghcr.io/<ВАШ_GITHUB_ЛОГИН>/weather-app-stateful:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: YANDEX_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: weather-secrets
+              key: yandex-api-key
+        - name: DB_HOST
+          value: "weather-db-stateful-service"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: weather-secrets
+              key: db-user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: weather-secrets
+              key: db-password
+        - name: DB_NAME
+          value: "weather_db"
+---
+# 5. Внешний сервис для доступа через браузер
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-app-stateful-service
+spec:
+  type: NodePort
+  selector:
+    app: weather-app-stateful
+  ports:
+    - port: 80
+      targetPort: 3000
