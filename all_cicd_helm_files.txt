@@ -1,0 +1,281 @@
+================================================================================
+File: .github/workflows/cicd.yml
+================================================================================
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - cicd_example
+  workflow_dispatch:
+
+env:
+  IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/weather-app-stateful
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_REPO }}:${{ github.sha }}
+
+      - name: Generate kubeconfig
+        env:
+          KUBECONFIG_CONTENT: |
+            apiVersion: v1
+            kind: Config
+            clusters:
+            - cluster:
+                insecure-skip-tls-verify: true
+                server: ${{ secrets.K8S_CLUSTER_SERVER }}
+              name: k3s-cluster
+            contexts:
+            - context:
+                cluster: k3s-cluster
+                namespace: student812
+                user: github-actions
+              name: default
+            current-context: default
+            users:
+            - name: github-actions
+              user:
+                token: ${{ secrets.K8S_SA_TOKEN }}
+        run: |
+          mkdir -p ~/.kube
+          echo "$KUBECONFIG_CONTENT" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Deploy to Kubernetes using Helm
+        run: |
+          helm upgrade --install weather-app ./charts/weather-app \
+            --namespace student812 \
+            --create-namespace \
+            --set image.repository=${{ env.IMAGE_REPO }} \
+            --set image.tag=${{ github.sha }} \
+            --wait \
+            --timeout 2m
+          echo "✅ Deployment successful. App updated, Stateful resources untouched."
+
+================================================================================
+File: k8s/infra-only.yaml
+================================================================================
+# ВАЖНО: Этот файл — эталон (one-time file). Do not re-apply. Не применяй повторно, если ресурсы уже созданы.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: weather-secrets
+  namespace: student812
+type: Opaque
+stringData:
+  db-user: "postgres"
+  db-password: "YOUR_DB_PASSWORD"
+  yandex-api-key: "YOUR_YANDEX_API_KEY"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: weather-db-pvc
+  namespace: student812
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-db-stateful-service
+  namespace: student812
+spec:
+  clusterIP: None
+  selector:
+    app: weather-db
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: weather-db
+  namespace: student812
+spec:
+  serviceName: weather-db-stateful-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weather-db
+  template:
+    metadata:
+      labels:
+        app: weather-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: db-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: db-password
+            - name: POSTGRES_DB
+              value: "weather_db"
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: weather-db-pvc
+
+================================================================================
+File: charts/weather-app/Chart.yaml
+================================================================================
+apiVersion: v2
+name: weather-app
+description: A Helm chart for the weather Node.js application
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+================================================================================
+File: charts/weather-app/values.yaml
+================================================================================
+replicaCount: 1
+
+image:
+  repository: ghcr.io/student-spb/weather-app-stateful
+  pullPolicy: IfNotPresent
+  tag: "CHANGE_ME_TO_COMMIT_HASH"
+
+service:
+  type: NodePort
+  port: 80
+  targetPort: 3000
+
+db:
+  host: weather-db-stateful-service
+
+================================================================================
+File: charts/weather-app/templates/_helpers.tpl
+================================================================================
+{{/*
+Expand the name of the chart.
+*/}}
+{{- define "weather-app.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Create a default fully qualified app name.
+*/}}
+{{- define "weather-app.fullname" -}}
+{{- printf "%s-%s" .Release.Name (include "weather-app.name" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+================================================================================
+File: charts/weather-app/templates/deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weather-app.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "weather-app.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "weather-app.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "weather-app.name" . }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          env:
+            - name: DB_HOST
+              value: {{ .Values.db.host }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: db-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: db-password
+            - name: YANDEX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: yandex-api-key
+            - name: DB_NAME
+              value: "weather_db"
+            - name: DB_PORT
+              value: "5432"
+
+================================================================================
+File: charts/weather-app/templates/service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "weather-app.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "weather-app.name" . }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: {{ include "weather-app.name" . }}

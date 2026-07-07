@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weather-app.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "weather-app.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "weather-app.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "weather-app.name" . }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          env:
+            - name: DB_HOST
+              value: {{ .Values.db.host }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: db-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: db-password
+            - name: YANDEX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: yandex-api-key
+            - name: DB_NAME
+              value: "weather_db"
+            - name: DB_PORT
+              value: "5432"

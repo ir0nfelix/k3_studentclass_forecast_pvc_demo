@@ -1,0 +1,77 @@
+# ВАЖНО: Этот файл — эталон (one-time file). Do not re-apply. Не применяй повторно, если ресурсы уже созданы.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: weather-secrets
+  namespace: student812
+type: Opaque
+stringData:
+  db-user: "postgres"
+  db-password: "YOUR_DB_PASSWORD"
+  yandex-api-key: "YOUR_YANDEX_API_KEY"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: weather-db-pvc
+  namespace: student812
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-db-stateful-service
+  namespace: student812
+spec:
+  clusterIP: None
+  selector:
+    app: weather-db
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: weather-db
+  namespace: student812
+spec:
+  serviceName: weather-db-stateful-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weather-db
+  template:
+    metadata:
+      labels:
+        app: weather-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: db-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: weather-secrets
+                  key: db-password
+            - name: POSTGRES_DB
+              value: "weather_db"
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: weather-db-pvc

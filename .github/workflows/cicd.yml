@@ -1,0 +1,77 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - cicd_example
+  workflow_dispatch:
+
+env:
+  IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/weather-app-stateful
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_REPO }}:${{ github.sha }}
+
+      - name: Generate kubeconfig
+        env:
+          KUBECONFIG_CONTENT: |
+            apiVersion: v1
+            kind: Config
+            clusters:
+            - cluster:
+                insecure-skip-tls-verify: true
+                server: ${{ secrets.K8S_CLUSTER_SERVER }}
+              name: k3s-cluster
+            contexts:
+            - context:
+                cluster: k3s-cluster
+                namespace: student812
+                user: github-actions
+              name: default
+            current-context: default
+            users:
+            - name: github-actions
+              user:
+                token: ${{ secrets.K8S_SA_TOKEN }}
+        run: |
+          mkdir -p ~/.kube
+          echo "$KUBECONFIG_CONTENT" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Deploy to Kubernetes using Helm
+        run: |
+          helm upgrade --install weather-app ./charts/weather-app \
+            --namespace student812 \
+            --create-namespace \
+            --set image.repository=${{ env.IMAGE_REPO }} \
+            --set image.tag=${{ github.sha }} \
+            --wait \
+            --timeout 2m
+          echo "✅ Deployment successful. App updated, Stateful resources untouched."
